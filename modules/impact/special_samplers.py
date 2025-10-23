@@ -50,7 +50,7 @@ class KSamplerProvider:
                                 "steps": ("INT", {"default": 20, "min": 1, "max": 10000, "tooltip": "total sampling steps"}),
                                 "cfg": ("FLOAT", {"default": 8.0, "min": 0.0, "max": 100.0, "tooltip": "classifier free guidance value"}),
                                 "sampler_name": (comfy.samplers.KSampler.SAMPLERS, {"tooltip": "sampler"}),
-                                "scheduler": (core.get_schedulers(), {"tooltip": "noise schedule"}),
+                                "scheduler": (core.SCHEDULERS, {"tooltip": "noise schedule"}),
                                 "denoise": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": "The amount of noise to remove. This amount is the noise added at the start, and the higher it is, the more the input latent will be modified before being returned."}),
                                 "basic_pipe": ("BASIC_PIPE", {"tooltip": "basic_pipe input for sampling"})
                              },
@@ -79,7 +79,7 @@ class KSamplerAdvancedProvider:
         return {"required": {
                                 "cfg": ("FLOAT", {"default": 8.0, "min": 0.0, "max": 100.0, "toolip": "classifier free guidance value"}),
                                 "sampler_name": (comfy.samplers.KSampler.SAMPLERS, {"toolip": "sampler"}),
-                                "scheduler": (core.get_schedulers(), {"toolip": "noise schedule"}),
+                                "scheduler": (core.SCHEDULERS, {"toolip": "noise schedule"}),
                                 "sigma_factor": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01, "toolip": "Multiplier of noise schedule"}),
                                 "basic_pipe": ("BASIC_PIPE", {"toolip": "basic_pipe input for sampling"})
                              },
@@ -247,38 +247,55 @@ class CombineConditionings:
 class ConcatConditionings:
     @classmethod
     def INPUT_TYPES(s):
-        return {"required": {
+        return {"optional": {
                      "conditioning1": ("CONDITIONING", { "tooltip": "input conditionings. (Connecting to the input slot increases the number of additional slots.)" }),
                      },
                 }
 
     OUTPUT_TOOLTIPS = ("Concatenated conditioning", )
 
-    RETURN_TYPES = ("CONDITIONING", )
+    RETURN_TYPES = ("CONDITIONING",)
     FUNCTION = "doit"
 
     CATEGORY = "ImpactPack/Util"
 
     @staticmethod
     def doit(**kwargs):
-        conditioning_to = list(kwargs.values())[0]
+        # kwargs will contain all connected or unconnected optional inputs (e.g., {'conditioning1': None, 'conditioning2': [...]})
 
-        for k, conditioning_from in list(kwargs.items())[1:]:
-            out = []
-            if len(conditioning_from) > 1:
-                logging.warning("Warning: ConcatConditionings {k} contains more than 1 cond, only the first one will actually be applied to conditioning1.")
+        all_conditionings = list(kwargs.values())
 
-            cond_from = conditioning_from[0][0]
+        # 1. Collect all VALID, ENABLED conditionings
+        valid_inputs = []
+        for cond_input in all_conditionings:
+            # Check for: 1) Not None (connected) AND 2) List AND 3) Not empty list (enabled)
+            if cond_input is not None and isinstance(cond_input, list) and len(cond_input) > 0:
+                valid_inputs.append(cond_input)
 
-            for i in range(len(conditioning_to)):
-                t1 = conditioning_to[i][0]
+        # 2. Handle the case where NO inputs are valid or connected
+        if not valid_inputs:
+            # Return a valid EMPTY CONDITIONING
+            logging.warning("ConcatConditionings: No valid conditionings received. Returning an empty CONDITIONING.")
+            return ([],)
+
+        # 3. Perform concatenation (using the first valid input as the base)
+        final_conditioning = valid_inputs[0]
+
+        for additional_cond in valid_inputs[1:]:
+            # ... (Concatenation logic remains the same) ...
+
+            cond_from = additional_cond[0][0]
+            new_conditioning_list = []
+
+            for i in range(len(final_conditioning)):
+                t1 = final_conditioning[i][0]
                 tw = torch.cat((t1, cond_from), 1)
-                n = [tw, conditioning_to[i][1].copy()]
-                out.append(n)
+                n = [tw, final_conditioning[i][1].copy()]
+                new_conditioning_list.append(n)
 
-            conditioning_to = out
+            final_conditioning = new_conditioning_list
 
-        return (out, )
+        return (final_conditioning,)
 
 
 class RegionalSampler:
@@ -580,7 +597,7 @@ class KSamplerBasicPipe:
                      "steps": ("INT", {"default": 20, "min": 1, "max": 10000, "tooltip": "total sampling steps"}),
                      "cfg": ("FLOAT", {"default": 8.0, "min": 0.0, "max": 100.0, "tooltip": "classifier free guidance value"}),
                      "sampler_name": (comfy.samplers.KSampler.SAMPLERS, {"tooltip": "sampler"}),
-                     "scheduler": (core.get_schedulers(), {"tooltip": "noise schedule"}),
+                     "scheduler": (core.SCHEDULERS, {"tooltip": "noise schedule"}),
                      "latent_image": ("LATENT", {"tooltip": "input latent image"}),
                      "denoise": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": "The amount of noise to remove. This amount is the noise added at the start, and the higher it is, the more the input latent will be modified before being returned."}),
                      },
@@ -614,7 +631,7 @@ class KSamplerAdvancedBasicPipe:
                      "steps": ("INT", {"default": 20, "min": 1, "max": 10000, "tooltip": "total sampling steps"}),
                      "cfg": ("FLOAT", {"default": 8.0, "min": 0.0, "max": 100.0, "tooltip": "classifier free guidance value"}),
                      "sampler_name": (comfy.samplers.KSampler.SAMPLERS, {"tooltip": "sampler"}),
-                     "scheduler": (core.get_schedulers(), {"tooltip": "noise schedule"}),
+                     "scheduler": (core.SCHEDULERS, {"tooltip": "noise schedule"}),
                      "latent_image": ("LATENT", {"tooltip": "input latent image"}),
                      "start_at_step": ("INT", {"default": 0, "min": 0, "max": 10000, "tooltip": "The starting step of the sampling to be applied at this node within the range of 'steps'."}),
                      "end_at_step": ("INT", {"default": 10000, "min": 0, "max": 10000, "tooltip": "The step at which sampling applied at this node will stop within the range of steps (if greater than steps, sampling will continue only up to steps)."}),
