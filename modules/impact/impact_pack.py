@@ -228,7 +228,7 @@ class DetailerForEach:
                     "steps": ("INT", {"default": 20, "min": 1, "max": 10000}),
                     "cfg": ("FLOAT", {"default": 8.0, "min": 0.0, "max": 100.0}),
                     "sampler_name": (comfy.samplers.KSampler.SAMPLERS,),
-                    "scheduler": (core.get_schedulers(),),
+                    "scheduler": (core.SCHEDULERS,),
                     "positive": ("CONDITIONING",),
                     "negative": ("CONDITIONING",),
                     "denoise": ("FLOAT", {"default": 0.5, "min": 0.0001, "max": 1.0, "step": 0.01}),
@@ -301,7 +301,7 @@ class DetailerForEach:
             ordered_segs = segs[1]
 
         if not (isinstance(model, str) and model == "DUMMY") and noise_mask_feather > 0 and 'denoise_mask_function' not in model.model_options:
-            model = nodes_differential_diffusion.DifferentialDiffusion().execute(model)[0]
+            model = nodes_differential_diffusion.DifferentialDiffusion().apply(model)[0]
 
         for i, seg in enumerate(ordered_segs):
             cropped_image = utils.crop_ndarray4(image.cpu().numpy(), seg.crop_region)  # Never use seg.cropped_image to handle overlapping area
@@ -444,7 +444,7 @@ class DetailerForEachAutoRetry:
                     "steps": ("INT", {"default": 20, "min": 1, "max": 10000}),
                     "cfg": ("FLOAT", {"default": 8.0, "min": 0.0, "max": 100.0}),
                     "sampler_name": (comfy.samplers.KSampler.SAMPLERS,),
-                    "scheduler": (core.get_schedulers(),),
+                    "scheduler": (core.SCHEDULERS,),
                     "positive": ("CONDITIONING",),
                     "negative": ("CONDITIONING",),
                     "denoise": ("FLOAT", {"default": 0.5, "min": 0.0001, "max": 1.0, "step": 0.01}),
@@ -518,7 +518,7 @@ class DetailerForEachAutoRetry:
             ordered_segs = segs[1]
 
         if not (isinstance(model, str) and model == "DUMMY") and noise_mask_feather > 0 and 'denoise_mask_function' not in model.model_options:
-            model = nodes_differential_diffusion.DifferentialDiffusion().execute(model)[0]
+            model = nodes_differential_diffusion.DifferentialDiffusion().apply(model)[0]
 
         for i, seg in enumerate(ordered_segs):
             cropped_image = utils.crop_ndarray4(image.cpu().numpy(), seg.crop_region)  # Never use seg.cropped_image to handle overlapping area
@@ -593,7 +593,7 @@ class DetailerForEachAutoRetry:
                                                                     cycle=cycle, inpaint_model=inpaint_model, noise_mask_feather=noise_mask_feather,
                                                                     scheduler_func=scheduler_func_opt, vae_tiled_encode=tiled_encode,
                                                                     vae_tiled_decode=tiled_decode)
-
+                
                     if detailer_hook is None or not detailer_hook.should_retry_patch(enhanced_image):
                         break
 
@@ -650,7 +650,7 @@ class DetailerForEachAutoRetry:
             DetailerForEachAutoRetry.do_detail(image, segs, model, clip, vae, guide_size, guide_size_for, max_size, seed, steps,
                                       cfg, sampler_name, scheduler, positive, negative, denoise, feather, noise_mask,
                                       force_inpaint, wildcard, detailer_hook,
-                                      cycle=cycle, inpaint_model=inpaint_model, noise_mask_feather=noise_mask_feather,
+                                      cycle=cycle, inpaint_model=inpaint_model, noise_mask_feather=noise_mask_feather, 
                                       scheduler_func_opt=scheduler_func_opt, tiled_encode=tiled_encode, tiled_decode=tiled_decode, max_retries=max_retries)
 
         return (enhanced_img, )
@@ -669,7 +669,7 @@ class DetailerForEachPipe:
                       "steps": ("INT", {"default": 20, "min": 1, "max": 10000}),
                       "cfg": ("FLOAT", {"default": 8.0, "min": 0.0, "max": 100.0}),
                       "sampler_name": (comfy.samplers.KSampler.SAMPLERS,),
-                      "scheduler": (core.get_schedulers(),),
+                      "scheduler": (core.SCHEDULERS,),
                       "denoise": ("FLOAT", {"default": 0.5, "min": 0.0001, "max": 1.0, "step": 0.01}),
                       "feather": ("INT", {"default": 5, "min": 0, "max": 100, "step": 1}),
                       "noise_mask": ("BOOLEAN", {"default": True, "label_on": "enabled", "label_off": "disabled"}),
@@ -747,7 +747,7 @@ class FaceDetailer:
                      "steps": ("INT", {"default": 20, "min": 1, "max": 10000}),
                      "cfg": ("FLOAT", {"default": 8.0, "min": 0.0, "max": 100.0}),
                      "sampler_name": (comfy.samplers.KSampler.SAMPLERS,),
-                     "scheduler": (core.get_schedulers(),),
+                     "scheduler": (core.SCHEDULERS,),
                      "positive": ("CONDITIONING",),
                      "negative": ("CONDITIONING",),
                      "denoise": ("FLOAT", {"default": 0.5, "min": 0.0001, "max": 1.0, "step": 0.01}),
@@ -1170,25 +1170,26 @@ class NoiseInjectionHookProvider:
 
 
 class DenoiseScheduleHookProvider:
-    schedules = ["simple"]
-
     @classmethod
     def INPUT_TYPES(s):
+        tooltip_text = ("Affects how the denoise will increase of decrease along the steps taken by the iterative upscale custom node. (Old 'Simple method')\n"
+                        "1.0: Linear Progression, increments or decrements in the denoise happens at a fixed rate.\n"
+                        "< 1.0: Progression that starts with slower increments or decrements, and faster rates towards the end. (Old 'Geometric method' Steeper drop curve)\n"
+                        "> 1.0: Progression that starts with faster increments or decrements, and slower rates towards the end.")
         return {"required": {
-                     "schedule_for_iteration": (s.schedules,),
-                     "target_denoise": ("FLOAT", {"default": 0.2, "min": 0.0, "max": 1.0, "step": 0.01}),
-                    },
-                }
+            "target_denoise": ("FLOAT", {"default": 0.2, "min": 0.0, "max": 1.0, "step": 0.01}),
+            "progression_speed": ("FLOAT", {"default": 1.0, "min": 0.1, "max": 4.0, "step": 0.1,
+                                         "tooltip": tooltip_text}),
+        },
+        }
 
     RETURN_TYPES = ("PK_HOOK",)
     FUNCTION = "doit"
 
     CATEGORY = "ImpactPack/Upscale"
 
-    def doit(self, schedule_for_iteration, target_denoise):
-        hook = None
-        if schedule_for_iteration == "simple":
-            hook = hooks.SimpleDenoiseScheduleHook(target_denoise)
+    def doit(self, target_denoise, progression_speed):
+        hook = hooks.SimpleDenoiseScheduleHook(target_denoise, progression_speed)
 
         return (hook, )
 
@@ -1256,7 +1257,7 @@ class PixelKSampleHookCombine:
 
 
 class PixelTiledKSampleUpscalerProvider:
-    upscale_methods = ["nearest-exact", "bilinear", "lanczos", "area"]
+    upscale_methods = ["nearest-exact", "bilinear", "bicubic", "lanczos", "area"]
 
     @classmethod
     def INPUT_TYPES(s):
@@ -1305,7 +1306,7 @@ class PixelTiledKSampleUpscalerProvider:
 
 
 class PixelTiledKSampleUpscalerProviderPipe:
-    upscale_methods = ["nearest-exact", "bilinear", "lanczos", "area"]
+    upscale_methods = ["nearest-exact", "bilinear", "bicubic", "lanczos", "area"]
 
     @classmethod
     def INPUT_TYPES(s):
@@ -1349,7 +1350,7 @@ class PixelTiledKSampleUpscalerProviderPipe:
 
 
 class PixelKSampleUpscalerProvider:
-    upscale_methods = ["nearest-exact", "bilinear", "lanczos", "area"]
+    upscale_methods = ["nearest-exact", "bilinear", "bicubic", "lanczos", "area"]
 
     @classmethod
     def INPUT_TYPES(s):
@@ -1361,7 +1362,7 @@ class PixelKSampleUpscalerProvider:
                     "steps": ("INT", {"default": 20, "min": 1, "max": 10000}),
                     "cfg": ("FLOAT", {"default": 8.0, "min": 0.0, "max": 100.0}),
                     "sampler_name": (comfy.samplers.KSampler.SAMPLERS, ),
-                    "scheduler": (core.get_schedulers(), ),
+                    "scheduler": (core.SCHEDULERS, ),
                     "positive": ("CONDITIONING", ),
                     "negative": ("CONDITIONING", ),
                     "denoise": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}),
@@ -1389,7 +1390,7 @@ class PixelKSampleUpscalerProvider:
 
 
 class PixelKSampleUpscalerProviderPipe(PixelKSampleUpscalerProvider):
-    upscale_methods = ["nearest-exact", "bilinear", "lanczos", "area"]
+    upscale_methods = ["nearest-exact", "bilinear", "bicubic", "lanczos", "area"]
 
     @classmethod
     def INPUT_TYPES(s):
@@ -1399,7 +1400,7 @@ class PixelKSampleUpscalerProviderPipe(PixelKSampleUpscalerProvider):
                     "steps": ("INT", {"default": 20, "min": 1, "max": 10000}),
                     "cfg": ("FLOAT", {"default": 8.0, "min": 0.0, "max": 100.0}),
                     "sampler_name": (comfy.samplers.KSampler.SAMPLERS, ),
-                    "scheduler": (core.get_schedulers(), ),
+                    "scheduler": (core.SCHEDULERS, ),
                     "denoise": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}),
                     "use_tiled_vae": ("BOOLEAN", {"default": False, "label_on": "enabled", "label_off": "disabled"}),
                     "basic_pipe": ("BASIC_PIPE",),
@@ -1431,7 +1432,7 @@ class PixelKSampleUpscalerProviderPipe(PixelKSampleUpscalerProvider):
 
 
 class TwoSamplersForMaskUpscalerProvider:
-    upscale_methods = ["nearest-exact", "bilinear", "lanczos", "area"]
+    upscale_methods = ["nearest-exact", "bilinear", "bicubic", "lanczos", "area"]
 
     @classmethod
     def INPUT_TYPES(s):
@@ -1473,7 +1474,7 @@ class TwoSamplersForMaskUpscalerProvider:
 
 
 class TwoSamplersForMaskUpscalerProviderPipe:
-    upscale_methods = ["nearest-exact", "bilinear", "lanczos", "area"]
+    upscale_methods = ["nearest-exact", "bilinear", "bicubic", "lanczos", "area"]
 
     @classmethod
     def INPUT_TYPES(s):
@@ -1521,16 +1522,26 @@ class TwoSamplersForMaskUpscalerProviderPipe:
 class IterativeLatentUpscale:
     @classmethod
     def INPUT_TYPES(s):
+        # Updated tooltip to reflect the new functionality
+        tooltip_text = ("1.0: Linear resolution steps, making it upscale the image in at even spaced increments. (similar to original 'simple')\n"
+                        "Like 1.0, 1.25, 1.50, 1.75 resize increments on a 2x Upscale that has 4 steps...\n"
+                        "< 1.0: Smaller resize increments at the initial steps, big at end (similar to original 'geometric', Steeper drop Curve).\n"
+                        "> 1.0: Big upscale increments at the initial steps, smaller at end.")
+
         return {"required": {
-                     "samples": ("LATENT", ),
-                     "upscale_factor": ("FLOAT", {"default": 1.5, "min": 1, "max": 10000, "step": 0.1}),
-                     "steps": ("INT", {"default": 3, "min": 1, "max": 10000, "step": 1}),
-                     "temp_prefix": ("STRING", {"default": ""}),
-                     "upscaler": ("UPSCALER",),
-                     "step_mode": (["simple", "geometric"], {"default": "simple"})
-                    },
-                "hidden": {"unique_id": "UNIQUE_ID"},
-                }
+            "samples": ("LATENT",),
+            "upscale_factor": ("FLOAT", {"default": 2.0, "min": 1.0, "max": 20, "step": 0.1}),
+            # Default set to 2.0 for clarity
+            "steps": ("INT", {"default": 4, "min": 1, "max": 200, "step": 1}),
+            "temp_prefix": ("STRING", {"default": ""}),
+            "upscaler": ("UPSCALER",),
+
+            # Simplified step_mode and replaced geometric_decrease_ratio with geometric_curve
+            "progression_speed": ("FLOAT", {"default": 1.0, "min": 0.1, "max": 4.0, "step": 0.1,
+                                          "tooltip": tooltip_text}),
+        },
+            "hidden": {"unique_id": "UNIQUE_ID"},
+        }
 
     RETURN_TYPES = ("LATENT", "VAE")
     RETURN_NAMES = ("latent", "vae")
@@ -1538,46 +1549,80 @@ class IterativeLatentUpscale:
 
     CATEGORY = "ImpactPack/Upscale"
 
-    def doit(self, samples, upscale_factor, steps, temp_prefix, upscaler, step_mode="simple", unique_id=None):
-        w = samples['samples'].shape[3]*8  # image width
-        h = samples['samples'].shape[2]*8  # image height
+    # --- NEW, Generalized Factor Calculation Logic ---
+    def get_curved_geometric_schedule(self, upscale_factor: float, progression_speed: float, steps: int) -> list:
+        """
+        Generates a list of per-step factors that MULTIPLY exactly to upscale_factor.
+        A higher progression_speed now creates larger factors for the initial steps.
+        """
+        if steps <= 0 or upscale_factor <= 1.0:
+            return []
+
+        # 1. Distribute the logarithm of the upscale_factor (multiplication -> addition)
+        total_log_increase = np.log(upscale_factor)
+
+        # 2. Create weights based on the progression_speed
+
+        # --- KEY CHANGE: Direct use of progression_speed as the exponent ---
+        # This makes the effect intuitive:
+        # progression_speed > 1.0 (e.g., 2.0) -> exponent > 1.0 -> weights are squared/cubed -> faster initial steps
+        # progression_speed < 1.0 (e.g., 0.5) -> exponent < 1.0 -> weights are rooted -> slower initial steps
+        exponent = progression_speed
+
+        # Start with a simple linear decrease of weight: [steps, steps-1, ..., 1]
+        raw_weights = np.array([steps - i for i in range(steps)])
+
+        # Apply the curve exponent to warp the distribution of the weights
+        curved_weights = np.power(raw_weights, exponent)
+
+        # 3. Normalize the weights to sum up to the total_log_increase
+        normalized_log_increases = total_log_increase * (curved_weights / np.sum(curved_weights))
+
+        # 4. Convert back to multiplicative factors
+        factors = np.exp(normalized_log_increases)
+
+        return factors.tolist()
+
+    def doit(self, samples, upscale_factor, steps, temp_prefix, upscaler, progression_speed=1.0, unique_id=None):
+        w = samples['samples'].shape[3] * 8
+        h = samples['samples'].shape[2] * 8
 
         if temp_prefix == "":
             temp_prefix = None
 
-        if step_mode == "geometric":
-            upscale_factor_unit = pow(upscale_factor, 1.0/steps)
-        else:  # simple
-            upscale_factor_unit = max(0, (upscale_factor - 1.0) / steps)
+        # --- 1. Calculate the Step Factors/Units ---
+        if progression_speed == 1.0:
+            # Simple mode: Equal increase in scale for each step (additive)
+            increase_unit = max(0, (upscale_factor - 1.0) / steps)
+            factor_list = [1.0 + increase_unit] * steps
+        else:
+            # Use the new generalized function to create a geometrically curved list of factors
+            factor_list = self.get_curved_geometric_schedule(upscale_factor, progression_speed, steps)
 
         current_latent = samples
         noise_mask = current_latent.get('noise_mask')
-        scale = 1
+        scale = 1.0
 
-        for i in range(steps-1):
-            if step_mode == "geometric":
-                scale *= upscale_factor_unit
-            else:  # simple
-                scale += upscale_factor_unit
+        # --- 2. Iterate through all steps using the calculated factors ---
+        for i in range(steps):
+            # ... (Rest of the loop logic remains the same) ...
+            current_factor = factor_list[i]
+            scale *= current_factor
 
-            new_w = w*scale
-            new_h = h*scale
-            core.update_node_status(unique_id, f"{i+1}/{steps} steps | x{scale:.2f}", (i+1)/steps)
-            logging.info(f"IterativeLatentUpscale[{i+1}/{steps}]: {new_w:.1f}x{new_h:.1f} (scale:{scale:.2f}) ")
+            new_w = w * scale
+            new_h = h * scale
+
+            current_step = i + 1
+            progress = current_step / steps
+
+            # core.update_node_status(unique_id, f"{current_step}/{steps} steps | x{scale:.2f}", progress)
+            # logging.info(f"IterativeLatentUpscale[{current_step}/{steps}]: {new_w:.1f}x{new_h:.1f} (factor:{current_factor:.4f} | scale:{scale:.2f}) ")
+
             step_info = i, steps
             current_latent = upscaler.upscale_shape(step_info, current_latent, new_w, new_h, temp_prefix)
+
             if noise_mask is not None:
                 current_latent['noise_mask'] = noise_mask
-
-        if scale < upscale_factor:
-            new_w = w*upscale_factor
-            new_h = h*upscale_factor
-            core.update_node_status(unique_id, f"Final step | x{upscale_factor:.2f}", 1.0)
-            logging.info(f"IterativeLatentUpscale[Final]: {new_w:.1f}x{new_h:.1f} (scale:{upscale_factor:.2f}) ")
-            step_info = steps-1, steps
-            current_latent = upscaler.upscale_shape(step_info, current_latent, new_w, new_h, temp_prefix)
-
-        core.update_node_status(unique_id, "", None)
 
         return current_latent, upscaler.vae
 
@@ -1643,7 +1688,7 @@ class FaceDetailerPipe:
                     "steps": ("INT", {"default": 20, "min": 1, "max": 10000}),
                     "cfg": ("FLOAT", {"default": 8.0, "min": 0.0, "max": 100.0}),
                     "sampler_name": (comfy.samplers.KSampler.SAMPLERS,),
-                    "scheduler": (core.get_schedulers(),),
+                    "scheduler": (core.SCHEDULERS,),
                     "denoise": ("FLOAT", {"default": 0.5, "min": 0.0001, "max": 1.0, "step": 0.01}),
                     "feather": ("INT", {"default": 5, "min": 0, "max": 100, "step": 1}),
                     "noise_mask": ("BOOLEAN", {"default": True, "label_on": "enabled", "label_off": "disabled"}),
@@ -1749,7 +1794,7 @@ class MaskDetailerPipe:
                     "steps": ("INT", {"default": 20, "min": 1, "max": 10000}),
                     "cfg": ("FLOAT", {"default": 8.0, "min": 0.0, "max": 100.0}),
                     "sampler_name": (comfy.samplers.KSampler.SAMPLERS,),
-                    "scheduler": (core.get_schedulers(),),
+                    "scheduler": (core.SCHEDULERS,),
                     "denoise": ("FLOAT", {"default": 0.5, "min": 0.0001, "max": 1.0, "step": 0.01}),
 
                     "feather": ("INT", {"default": 5, "min": 0, "max": 100, "step": 1}),
@@ -2701,7 +2746,7 @@ class ImpactSchedulerAdapter:
 
     CATEGORY = "ImpactPack/Util"
 
-    RETURN_TYPES = (core.get_schedulers(),)
+    RETURN_TYPES = (core.SCHEDULERS,)
     RETURN_NAMES = ("scheduler",)
 
     FUNCTION = "doit"

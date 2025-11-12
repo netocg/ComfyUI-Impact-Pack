@@ -340,23 +340,22 @@ class MaskListToMaskBatch:
     CATEGORY = "ImpactPack/Operation"
 
     def doit(self, mask):
-        if len(mask) == 0:
+        if len(mask) == 1:
+            mask = make_3d_mask(mask[0])
+            return (mask,)
+        elif len(mask) > 1:
+            mask1 = make_3d_mask(mask[0])
+
+            for mask2 in mask[1:]:
+                mask2 = make_3d_mask(mask2)
+                if mask1.shape[1:] != mask2.shape[1:]:
+                    mask2 = comfy.utils.common_upscale(mask2.movedim(-1, 1), mask1.shape[2], mask1.shape[1], "lanczos", "center").movedim(1, -1)
+                mask1 = torch.cat((mask1, mask2), dim=0)
+
+            return (mask1,)
+        else:
             empty_mask = torch.zeros((1, 64, 64), dtype=torch.float32, device="cpu").unsqueeze(0)
             return (empty_mask,)
-
-        masks_3d = [make_3d_mask(m) for m in mask]
-        target_shape = masks_3d[0].shape[1:]
-        upscaled_masks = []
-        for m in masks_3d:
-            if m.shape[1:] != target_shape:
-                m = m.unsqueeze(1).repeat(1, 3, 1, 1)
-                m = comfy.utils.common_upscale(m, target_shape[1], target_shape[0], "lanczos", "center")
-                m = m[:, 0, :, :]
-            
-            upscaled_masks.append(m)
-        # Concatenate all at once
-        result = torch.cat(upscaled_masks, dim=0)
-        return (result,)
 
 
 class ImageListToImageBatch:
@@ -451,7 +450,7 @@ class NthItemOfAnyList:
     def INPUT_TYPES(s):
         return {"required":  {
                     "any_list": (any_typ,),
-                    "index": ("INT", {"default": 0, "min": -sys.maxsize, "max": sys.maxsize, "step": 1, "tooltip": "The index of the item you want to select from the list. Use negative values to select from the end (e.g., -1 for last item, -2 for second to last)."}),
+                    "index": ("INT", {"default": 0, "min": 0, "max": sys.maxsize, "step": 1, "tooltip": "The index of the item you want to select from the list."}),
                     }
         }
 
@@ -465,8 +464,7 @@ class NthItemOfAnyList:
 
     def doit(self, any_list, index):
         i = index[0]
-        list_len = len(any_list)
-        if i >= list_len or i < -list_len:
+        if i >= len(any_list):
             return (any_list[-1],)
         else:
             return (any_list[i],)
@@ -738,3 +736,88 @@ class WildcardPromptFromString:
         output = re.sub(r'\n, ', '\n', output)
 
         return output, ", ".join(labels)
+
+
+import torch
+import numpy as np
+
+
+class LuminanceMaskGenerator:
+    # Defines the category in the ComfyUI add node menu
+    CATEGORY = "masking"
+
+    @classmethod
+    def INPUT_TYPES(s):
+        """
+        Defines the inputs the node accepts.
+        IMAGE: The input image tensor.
+        """
+        return {
+            "required": {
+                "image": ("IMAGE",),
+                "toe": ("FLOAT", {
+                    "default": 0.2,
+                    "min": 0.0,
+                    "max": 1.0,
+                    "step": 0.01,
+                    "display": "slider"
+                }),
+                "shoulder": ("FLOAT", {
+                    "default": 0.8,
+                    "min": 0.0,
+                    "max": 1.0,
+                    "step": 0.01,
+                    "display": "slider"
+                }),
+                "invert": ("BOOLEAN", {
+                    "default": False
+                })
+            }
+        }
+
+    # Defines the output data types
+    RETURN_TYPES = ("MASK",)
+
+    # The name of the function to be executed
+    FUNCTION = "generate_blended_mask"
+
+    def generate_blended_mask(self, image, toe, shoulder, invert):
+        # 1. Input Validation
+        if toe >= shoulder:
+            print(f"Warning: Toe ({toe}) must be less than Shoulder ({shoulder}). Using toe=0.0 and shoulder=1.0.")
+            toe = 0.0
+            shoulder = 1.0
+
+        # 2. Convert RGB to Luminance
+        # 'image' is a torch.Tensor with shape [B, H, W, 3] and values [0, 1]
+        R = image[..., 0]
+        G = image[..., 1]
+        B = image[..., 2]
+
+        # Calculate Luminance (standard sRGB approximation)
+        luminance = 0.299 * R + 0.587 * G + 0.114 * B
+
+        # 3. Apply Linear Blend (Levels Adjustment)
+        # This is the core logic for the smooth transition.
+
+        # Calculate the range (delta) between shoulder and toe
+        blend_range = shoulder - toe
+
+        if blend_range <= 0.001:
+            # Handle near-zero range (use a hard threshold if the range is too small)
+            mask = (luminance > toe).float()
+        else:
+            # Shift the luminance so the 'toe' is at 0.0 (luminance - toe)
+            # Scale the shifted luminance to fit within [0, 1] ( / blend_range)
+            # Clip the values to ensure the output is clamped between 0.0 and 1.0
+            mask = torch.clamp((luminance - toe) / blend_range, 0.0, 1.0)
+
+        # 4. Optional Inversion
+        if invert:
+            mask = 1.0 - mask
+
+        # Masks in ComfyUI are expected to have shape [B, H, W]
+        # Luminance calculation maintains this shape.
+
+        # Return the mask as a tuple
+        return (mask,)

@@ -1,6 +1,7 @@
 import copy
 import torch
 import nodes
+import numpy as np
 from impact import utils
 from . import segs_nodes
 from thirdparty import noise_nodes
@@ -142,17 +143,44 @@ class SimpleCfgScheduleHook(PixelKSampleHook):
 
 
 class SimpleDenoiseScheduleHook(PixelKSampleHook):
-    def __init__(self, target_denoise):
+    def __init__(self, target_denoise, progression_speed=1.0):
         super().__init__()
         self.target_denoise = target_denoise
+        # Base of 1.0 results in the original linear progression (1^x = 1)
+        self.progression_speed = progression_speed
 
-    def pre_ksample(self, model, seed, steps, cfg, sampler_name, scheduler, positive, negative, upscaled_latent, denoise):
-        if self.total_step > 1:
-            progress = self.cur_step / (self.total_step - 1)
-            gap = self.target_denoise - denoise
-            current_denoise = denoise + gap * progress
+    def pre_ksample(self, model, seed, steps, cfg, sampler_name, scheduler, positive, negative, upscaled_latent,
+                    denoise):
+
+        if self.total_step <= 1:
+            return model, seed, steps, cfg, sampler_name, scheduler, positive, negative, upscaled_latent, self.target_denoise
+
+        # Calculate linear progression (progress goes from ~0 to ~1)
+        progress = self.cur_step / (self.total_step - 1)
+
+        # Apply geometric curve if base is not 1.0
+        if self.progression_speed != 1.0:
+            # 1. Invert the progress (e.g., 25% done -> 75% remaining)
+            inverted_progress = 1.0 - progress
+
+            # 2. Apply the exponent to the inverted progress (makes low speeds decay slower)
+            curved_inverted_progress = np.power(inverted_progress, self.progression_speed)
+
+            # 3. Invert back to get the desired steep curve (e.g., 1 - 0.5625 = 0.4375)
+            effective_progress = 1.0 - curved_inverted_progress
+
+            # Example with speed=2.0 at 25% step (progress=0.25):
+            # inverted_progress = 0.75
+            # curved_inverted_progress = 0.75^2 = 0.5625
+            # effective_progress = 1.0 - 0.5625 = 0.4375 (43.75% of change done)
+            # This is much faster than the 6.25% done by the old logic.
         else:
-            current_denoise = self.target_denoise
+            effective_progress = progress
+
+        gap = self.target_denoise - denoise
+
+        # Apply the effective progress to the gap
+        current_denoise = denoise + gap * effective_progress
 
         return model, seed, steps, cfg, sampler_name, scheduler, positive, negative, upscaled_latent, current_denoise
 
