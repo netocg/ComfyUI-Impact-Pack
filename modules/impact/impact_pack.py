@@ -1178,7 +1178,7 @@ class DenoiseScheduleHookProvider:
                         "> 1.0: Progression that starts with faster increments or decrements, and slower rates towards the end.")
         return {"required": {
             "target_denoise": ("FLOAT", {"default": 0.2, "min": 0.0, "max": 1.0, "step": 0.01}),
-            "progression_speed": ("FLOAT", {"default": 1.0, "min": 0.1, "max": 4.0, "step": 0.1,
+            "target_denoise_step_curve": ("FLOAT", {"default": 1.0, "min": 0.1, "max": 4.0, "step": 0.05,
                                          "tooltip": tooltip_text}),
         },
         }
@@ -1188,8 +1188,8 @@ class DenoiseScheduleHookProvider:
 
     CATEGORY = "ImpactPack/Upscale"
 
-    def doit(self, target_denoise, progression_speed):
-        hook = hooks.SimpleDenoiseScheduleHook(target_denoise, progression_speed)
+    def doit(self, target_denoise, target_denoise_step_curve):
+        hook = hooks.SimpleDenoiseScheduleHook(target_denoise, target_denoise_step_curve)
 
         return (hook, )
 
@@ -1530,14 +1530,13 @@ class IterativeLatentUpscale:
 
         return {"required": {
             "samples": ("LATENT",),
-            "upscale_factor": ("FLOAT", {"default": 2.0, "min": 1.0, "max": 20, "step": 0.1}),
-            # Default set to 2.0 for clarity
+            "upscale_factor": ("FLOAT", {"default": 2.0, "min": 1.0, "max": 20, "step": 0.05}),
             "steps": ("INT", {"default": 4, "min": 1, "max": 200, "step": 1}),
             "temp_prefix": ("STRING", {"default": ""}),
             "upscaler": ("UPSCALER",),
 
             # Simplified step_mode and replaced geometric_decrease_ratio with geometric_curve
-            "progression_speed": ("FLOAT", {"default": 1.0, "min": 0.1, "max": 4.0, "step": 0.1,
+            "upscale_factor_step_curve": ("FLOAT", {"default": 1.0, "min": 0.1, "max": 4.0, "step": 0.05,
                                           "tooltip": tooltip_text}),
         },
             "hidden": {"unique_id": "UNIQUE_ID"},
@@ -1550,10 +1549,10 @@ class IterativeLatentUpscale:
     CATEGORY = "ImpactPack/Upscale"
 
     # --- NEW, Generalized Factor Calculation Logic ---
-    def get_curved_geometric_schedule(self, upscale_factor: float, progression_speed: float, steps: int) -> list:
+    def get_curved_geometric_schedule(self, upscale_factor: float, upscale_factor_step_curve: float, steps: int) -> list:
         """
         Generates a list of per-step factors that MULTIPLY exactly to upscale_factor.
-        A higher progression_speed now creates larger factors for the initial steps.
+        A higher upscale_factor_step_curve now creates larger factors for the initial steps.
         """
         if steps <= 0 or upscale_factor <= 1.0:
             return []
@@ -1561,13 +1560,13 @@ class IterativeLatentUpscale:
         # 1. Distribute the logarithm of the upscale_factor (multiplication -> addition)
         total_log_increase = np.log(upscale_factor)
 
-        # 2. Create weights based on the progression_speed
+        # 2. Create weights based on the upscale_factor_step_curve
 
-        # --- KEY CHANGE: Direct use of progression_speed as the exponent ---
+        # --- KEY CHANGE: Direct use of upscale_factor_step_curve as the exponent ---
         # This makes the effect intuitive:
-        # progression_speed > 1.0 (e.g., 2.0) -> exponent > 1.0 -> weights are squared/cubed -> faster initial steps
-        # progression_speed < 1.0 (e.g., 0.5) -> exponent < 1.0 -> weights are rooted -> slower initial steps
-        exponent = progression_speed
+        # upscale_factor_step_curve > 1.0 (e.g., 2.0) -> exponent > 1.0 -> weights are squared/cubed -> faster initial steps
+        # upscale_factor_step_curve < 1.0 (e.g., 0.5) -> exponent < 1.0 -> weights are rooted -> slower initial steps
+        exponent = upscale_factor_step_curve
 
         # Start with a simple linear decrease of weight: [steps, steps-1, ..., 1]
         raw_weights = np.array([steps - i for i in range(steps)])
@@ -1583,7 +1582,7 @@ class IterativeLatentUpscale:
 
         return factors.tolist()
 
-    def doit(self, samples, upscale_factor, steps, temp_prefix, upscaler, progression_speed=1.0, unique_id=None):
+    def doit(self, samples, upscale_factor, steps, temp_prefix, upscaler, upscale_factor_step_curve=1.0, unique_id=None):
         w = samples['samples'].shape[3] * 8
         h = samples['samples'].shape[2] * 8
 
@@ -1591,13 +1590,13 @@ class IterativeLatentUpscale:
             temp_prefix = None
 
         # --- 1. Calculate the Step Factors/Units ---
-        if progression_speed == 1.0:
+        if upscale_factor_step_curve == 1.0:
             # Simple mode: Equal increase in scale for each step (additive)
             increase_unit = max(0, (upscale_factor - 1.0) / steps)
             factor_list = [1.0 + increase_unit] * steps
         else:
             # Use the new generalized function to create a geometrically curved list of factors
-            factor_list = self.get_curved_geometric_schedule(upscale_factor, progression_speed, steps)
+            factor_list = self.get_curved_geometric_schedule(upscale_factor, upscale_factor_step_curve, steps)
 
         current_latent = samples
         noise_mask = current_latent.get('noise_mask')

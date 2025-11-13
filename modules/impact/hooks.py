@@ -143,11 +143,11 @@ class SimpleCfgScheduleHook(PixelKSampleHook):
 
 
 class SimpleDenoiseScheduleHook(PixelKSampleHook):
-    def __init__(self, target_denoise, progression_speed=1.0):
+    def __init__(self, target_denoise, target_denoise_step_curve=1.0):
         super().__init__()
         self.target_denoise = target_denoise
         # Base of 1.0 results in the original linear progression (1^x = 1)
-        self.progression_speed = progression_speed
+        self.target_denoise_step_curve = target_denoise_step_curve
 
     def pre_ksample(self, model, seed, steps, cfg, sampler_name, scheduler, positive, negative, upscaled_latent,
                     denoise):
@@ -159,12 +159,12 @@ class SimpleDenoiseScheduleHook(PixelKSampleHook):
         progress = self.cur_step / (self.total_step - 1)
 
         # Apply geometric curve if base is not 1.0
-        if self.progression_speed != 1.0:
+        if self.target_denoise_step_curve != 1.0:
             # 1. Invert the progress (e.g., 25% done -> 75% remaining)
             inverted_progress = 1.0 - progress
 
             # 2. Apply the exponent to the inverted progress (makes low speeds decay slower)
-            curved_inverted_progress = np.power(inverted_progress, self.progression_speed)
+            curved_inverted_progress = np.power(inverted_progress, self.target_denoise_step_curve)
 
             # 3. Invert back to get the desired steep curve (e.g., 1 - 0.5625 = 0.4375)
             effective_progress = 1.0 - curved_inverted_progress
