@@ -1583,6 +1583,9 @@ class IterativeLatentUpscale:
         return factors.tolist()
 
     def doit(self, samples, upscale_factor, steps, temp_prefix, upscaler, upscale_factor_step_curve=1.0, unique_id=None):
+        if steps <= 0 or upscale_factor <= 1.0:
+            return samples, upscaler.vae
+
         w = samples['samples'].shape[3] * 8
         h = samples['samples'].shape[2] * 8
 
@@ -1590,13 +1593,7 @@ class IterativeLatentUpscale:
             temp_prefix = None
 
         # --- 1. Calculate the Step Factors/Units ---
-        if upscale_factor_step_curve == 1.0:
-            # Simple mode: Equal increase in scale for each step (additive)
-            increase_unit = max(0, (upscale_factor - 1.0) / steps)
-            factor_list = [1.0 + increase_unit] * steps
-        else:
-            # Use the new generalized function to create a geometrically curved list of factors
-            factor_list = self.get_curved_geometric_schedule(upscale_factor, upscale_factor_step_curve, steps)
+        factor_list = self.get_curved_geometric_schedule(upscale_factor, upscale_factor_step_curve, steps)
 
         current_latent = samples
         noise_mask = current_latent.get('noise_mask')
