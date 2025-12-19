@@ -247,48 +247,44 @@ class CombineConditionings:
 class ConcatConditionings:
     @classmethod
     def INPUT_TYPES(s):
+        # We start with a base name. ComfyUI will often handle the
+        # "incrementing" of slots if the backend supports dynamic inputs.
         return {"optional": {
-                     "conditioning1": ("CONDITIONING", { "tooltip": "input conditionings. (Connecting to the input slot increases the number of additional slots.)" }),
+                     "conditioning1": ("CONDITIONING", { "tooltip": "input conditionings." }),
                      },
                 }
 
     OUTPUT_TOOLTIPS = ("Concatenated conditioning", )
-
     RETURN_TYPES = ("CONDITIONING",)
     FUNCTION = "doit"
-
     CATEGORY = "ImpactPack/Util"
 
     @staticmethod
     def doit(**kwargs):
-        # kwargs will contain all connected or unconnected optional inputs (e.g., {'conditioning1': None, 'conditioning2': [...]})
+        # 1. Filter out any inputs that are None (disconnected)
+        # or empty lists (common for disabled/empty conditioning)
+        valid_inputs = [
+            v for v in kwargs.values()
+            if v is not None and isinstance(v, list) and len(v) > 0
+        ]
 
-        all_conditionings = list(kwargs.values())
-
-        # 1. Collect all VALID, ENABLED conditionings
-        valid_inputs = []
-        for cond_input in all_conditionings:
-            # Check for: 1) Not None (connected) AND 2) List AND 3) Not empty list (enabled)
-            if cond_input is not None and isinstance(cond_input, list) and len(cond_input) > 0:
-                valid_inputs.append(cond_input)
-
-        # 2. Handle the case where NO inputs are valid or connected
+        # 2. Safety check: If nothing is connected, return an empty conditioning list
         if not valid_inputs:
-            # Return a valid EMPTY CONDITIONING
-            logging.warning("ConcatConditionings: No valid conditionings received. Returning an empty CONDITIONING.")
             return ([],)
 
-        # 3. Perform concatenation (using the first valid input as the base)
+        # 3. Concatenation logic
+        # Start with the first connected conditioning
+        res = []
+        # We need to deep copy or be careful with list references
         final_conditioning = valid_inputs[0]
 
         for additional_cond in valid_inputs[1:]:
-            # ... (Concatenation logic remains the same) ...
-
             cond_from = additional_cond[0][0]
             new_conditioning_list = []
 
             for i in range(len(final_conditioning)):
                 t1 = final_conditioning[i][0]
+                # Concatenate along the sequence dimension (1)
                 tw = torch.cat((t1, cond_from), 1)
                 n = [tw, final_conditioning[i][1].copy()]
                 new_conditioning_list.append(n)
